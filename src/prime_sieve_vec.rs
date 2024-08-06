@@ -1,3 +1,5 @@
+use std::ops::Not;
+
 use bisection::bisect_right;
 
 pub struct PrimeSieveVec {
@@ -6,7 +8,7 @@ pub struct PrimeSieveVec {
     pub extend_at_most_n_segments_target: usize,
 }
 
-impl std::default::Default for PrimeSieveVec {
+impl Default for PrimeSieveVec {
     fn default() -> Self {
         Self {
             primes: vec![2, 3, 5, 7],
@@ -32,17 +34,21 @@ impl PrimeSieveVec {
         }
     }
 
-    /// Returns the last element of `self.primes`
+    /// A reference to the last element of `self.primes`
     ///
     /// # Safety
     /// `self.primes` must be non-empty.
     #[must_use]
-    pub unsafe fn most_recent_prime(&self) -> usize {
-        unsafe { *self.primes.get_unchecked(self.primes.len() - 1) }
+    pub unsafe fn most_recent_prime_unchecked(&self) -> &usize {
+        unsafe { self.primes.get_unchecked(self.primes.len() - 1) }
+    }
+
+    #[must_use]
+    pub fn most_recent_prime(&self) -> Option<&usize> {
+        self.primes.last()
     }
 
     /// calls `.reverse(additional)` on `self.primes`
-
     pub fn reserve_in_advance(&mut self, additional: usize) {
         self.primes.reserve(additional);
     }
@@ -86,11 +92,19 @@ impl PrimeSieveVec {
     ///
     /// # Safety
     /// `self.primes` must be non-empty when this is called.
-    pub unsafe fn count_primes_less_or_equal(&mut self, n: usize) -> usize {
-        while self.most_recent_prime() < n {
+    pub unsafe fn count_primes_less_or_equal_unchecked(&mut self, n: usize) -> usize {
+        while self.most_recent_prime_unchecked() < &n {
             self.extend();
         }
         bisect_right(&self.primes, &n)
+    }
+
+    /// Returns the number of primes < `n` if self.primes is non-empty, otherwise `None`.
+    pub fn count_primes_less_or_equal(&mut self, n: usize) -> Option<usize> {
+        self.primes
+            .is_empty()
+            .not()
+            .then_some(unsafe { self.count_primes_less_or_equal_unchecked(n) })
     }
 
     /// A slice of the first n primes calculated via an instance.
@@ -103,14 +117,13 @@ impl PrimeSieveVec {
         while self.primes.len() < n {
             self.extend();
         }
-
         &self.primes[..n]
     }
 
     pub fn nth_prime(&mut self, n: usize) -> usize {
         loop {
-            if let Some(x) = self.primes.get(n) {
-                return *x;
+            if let Some(x) = self.primes.get(n).copied() {
+                return x;
             }
             self.extend();
         }

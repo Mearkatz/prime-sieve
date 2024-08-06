@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [lints.clippy]
-enum_glob_use = "deny"
-pedantic = "deny"
-nursery = "deny"
-unwrap_used = "deny"
-expect_used = "deny"
+enum_glob_use = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -2 }
+nursery = { level = "deny", priority = -3 }
+unwrap_used = { level = "deny", priority = -4 }
+expect_used = { level = "deny", priority = -5 }
 
 
 [profile.release]
