@@ -1,6 +1,6 @@
 [package]
 name = "prime_sieve"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 [lints.clippy]
@@ -9,13 +9,6 @@ pedantic = { level = "deny", priority = -2 }
 nursery = { level = "deny", priority = -3 }
 unwrap_used = { level = "deny", priority = -4 }
 expect_used = { level = "deny", priority = -5 }
-
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"
 
 [dependencies]
 bisection = "0.1.0"

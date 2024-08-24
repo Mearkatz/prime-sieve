@@ -1,11 +1,8 @@
+use bisection::bisect_right;
+use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use std::{
     ops::Not,
     sync::atomic::{AtomicBool, Ordering},
-};
-
-use bisection::bisect_right;
-use rayon::iter::{
-    IntoParallelIterator, IntoParallelRefIterator, ParallelBridge, ParallelIterator,
 };
 
 pub struct PrimeSieveVec {
@@ -102,7 +99,7 @@ impl PrimeSieveVec {
             .take(segment_len)
             .collect();
 
-        self.primes[..k + n].par_iter().for_each(|pk| {
+        for pk in &self.primes[..k + n] {
             // Set all the multiples of pk to false (they aren't prime)
             let start = segment_min.next_multiple_of(*pk) - segment_min;
             let stop = is_prime.len();
@@ -113,7 +110,7 @@ impl PrimeSieveVec {
                 .for_each(|x| {
                     is_prime[x].store(false, Ordering::Relaxed);
                 });
-        });
+        }
 
         self.primes.extend(
             segment
