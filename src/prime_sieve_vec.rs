@@ -1,6 +1,12 @@
-use std::ops::Not;
+use std::{
+    ops::Not,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use bisection::bisect_right;
+use rayon::iter::{
+    IntoParallelIterator, IntoParallelRefIterator, ParallelBridge, ParallelIterator,
+};
 
 pub struct PrimeSieveVec {
     pub primes: Vec<usize>,
@@ -58,10 +64,9 @@ impl PrimeSieveVec {
         let k = self.end_segment;
         let p = self.primes[k];
         let q = self.primes[k + n];
-
         let segment = p * p..q * q;
         let segment_min = p * p;
-        let segment_max = q * q - 1;
+        let segment_max = q * q;
         let segment_len = segment_max - segment_min + 1;
 
         let mut is_prime: Box<[bool]> = std::iter::repeat(true).take(segment_len).collect();
@@ -78,6 +83,42 @@ impl PrimeSieveVec {
             segment
                 .zip(is_prime.iter())
                 .filter_map(|(x, it_is_prime)| it_is_prime.then_some(x)),
+        );
+
+        self.end_segment += n;
+    }
+
+    pub fn extend_at_most_n_segments_threaded(&mut self, n: usize) {
+        let k = self.end_segment;
+        let p = self.primes[k];
+        let q = self.primes[k + n];
+        let segment_min = p * p;
+        let segment_max = q * q - 1;
+        let segment = segment_min..segment_max;
+        let segment_len = segment_max - segment_min + 1;
+
+        // let mut is_prime: Box<[bool]> = std::iter::repeat(true).take(segment_len).collect();
+        let mut is_prime: Box<[AtomicBool]> = std::iter::repeat_with(|| AtomicBool::new(true))
+            .take(segment_len)
+            .collect();
+
+        self.primes[..k + n].par_iter().for_each(|pk| {
+            // Set all the multiples of pk to false (they aren't prime)
+            let start = segment_min.next_multiple_of(*pk) - segment_min;
+            let stop = is_prime.len();
+            (start..stop)
+                .step_by(*pk)
+                .par_bridge()
+                .into_par_iter()
+                .for_each(|x| {
+                    is_prime[x].store(false, Ordering::Relaxed);
+                });
+        });
+
+        self.primes.extend(
+            segment
+                .zip(is_prime.iter())
+                .filter_map(|(x, it_is_prime)| it_is_prime.load(Ordering::Relaxed).then_some(x)),
         );
 
         self.end_segment += n;

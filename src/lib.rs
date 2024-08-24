@@ -13,5 +13,6 @@ mod tests {
         assert_eq!(primes_lte(10_000), 1_229);
         assert_eq!(primes_lte(100_000), 9_592);
         assert_eq!(primes_lte(1_000_000), 78_498);
+        assert_eq!(primes_lte(1_000_000_000), 50_847_534);
     }
 }

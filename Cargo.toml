@@ -1,6 +1,6 @@
 [package]
 name = "prime_sieve"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [lints.clippy]
@@ -19,3 +19,4 @@ panic = "abort"
 
 [dependencies]
 bisection = "0.1.0"
+rayon = "1.10.0"
