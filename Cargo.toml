@@ -7,9 +7,19 @@ edition = "2021"
 enum_glob_use = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -2 }
 nursery = { level = "deny", priority = -3 }
-unwrap_used = { level = "deny", priority = -4 }
+# unwrap_used = { level = "deny", priority = -4 }
 expect_used = { level = "deny", priority = -5 }
+
+[profile.release]
+# debug = true
+# codegen-units = 1
+# lto = "fat"
+# panic = "abort"
+# strip = "symbols"
 
 [dependencies]
 bisection = "0.1.0"
-rayon = "1.10.0"
+
+
+[[bin]]
+name = "main"

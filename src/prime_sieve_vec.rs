@@ -1,169 +1,286 @@
-use bisection::bisect_right;
-use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use std::{
-    ops::Not,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{Arc, Mutex},
+    thread::{self, JoinHandle},
 };
 
+use bisection::bisect_right;
+
+/// An approximation for the number of primes < n
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+#[must_use]
+pub fn approx_primes_lt(n: usize) -> usize {
+    let m = n as f64;
+    (m / m.ln()) as usize
+}
+
+#[derive(Debug)]
 pub struct PrimeSieveVec {
     pub primes: Vec<usize>,
+    pub is_prime: Vec<bool>,
     pub end_segment: usize,
-    pub extend_at_most_n_segments_target: usize,
 }
 
 impl Default for PrimeSieveVec {
     fn default() -> Self {
         Self {
-            primes: vec![2, 3, 5, 7],
+            primes: Self::STARTING_PRIMES.to_vec(),
+            is_prime: vec![],
             end_segment: 1,
-            extend_at_most_n_segments_target: 1,
         }
     }
 }
 
 #[allow(unused)]
 impl PrimeSieveVec {
+    pub const STARTING_PRIMES: [usize; 4] = [2, 3, 5, 7];
+
     /// Creates a new `PrimeSieveVec`
     #[must_use]
-    pub fn new(extend_at_most_n_segments_target: usize) -> Self {
-        Self {
-            primes: {
-                let mut sieve = Self::default();
-                sieve.first_n_primes(extend_at_most_n_segments_target + 2);
-                sieve.primes
-            },
-            extend_at_most_n_segments_target,
-            ..Self::default()
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn prime_factors_of(&mut self, mut n: usize) -> impl Iterator<Item = usize> + '_ {
+        self.primes_lt(n)
+            .iter()
+            .copied()
+            .filter(move |m| n % *m == 0)
+    }
+
+    pub fn first_prime_factor_of(&mut self, n: usize) -> usize {
+        let mut index = 0;
+        loop {
+            if let Some(m) = self.primes.get(index) {
+                if n % m == 0 {
+                    return *m;
+                }
+            } else {
+                self.extend();
+            }
         }
     }
 
-    /// A reference to the last element of `self.primes`
-    ///
-    /// # Safety
-    /// `self.primes` must be non-empty.
-    #[must_use]
-    pub unsafe fn most_recent_prime_unchecked(&self) -> &usize {
-        unsafe { self.primes.get_unchecked(self.primes.len() - 1) }
-    }
-
-    #[must_use]
-    pub fn most_recent_prime(&self) -> Option<&usize> {
-        self.primes.last()
-    }
-
-    /// calls `.reverse(additional)` on `self.primes`
+    /// calls `.reserve(additional)` on `self.primes`
     pub fn reserve_in_advance(&mut self, additional: usize) {
         self.primes.reserve(additional);
     }
 
+    /// Calculates some new primes
+    /// # Panics
+    /// Might panic due to use of unwrap
+    #[inline]
     #[allow(clippy::many_single_char_names)]
-    pub fn extend_at_most_n_segments(&mut self, n: usize) {
+    pub fn extend(&mut self) {
+        // let k = self.end_segment;
+        // let p = *unsafe { self.primes.get_unchecked(k) };
+        // let q = *unsafe { self.primes.get_unchecked(k + 1) };
+        // let segment = p * p..q * q;
+
+        // self.is_prime.fill(true);
+        // self.is_prime.resize(segment.len(), true);
+
+        // for pk in self.primes[..=k].iter().copied() {
+        //     let start = segment.start.next_multiple_of(pk) - segment.start;
+        //     for x in (start..self.is_prime.len()).step_by(pk) {
+        //         *unsafe { self.is_prime.get_unchecked_mut(x) } = false;
+        //     }
+        // }
+
+        // self.primes.extend(
+        //     segment
+        //         .zip(&self.is_prime)
+        //         .filter_map(|(x, prime)| prime.then_some(x)),
+        // );
+        // self.end_segment += 1;
+
         let k = self.end_segment;
-        let p = self.primes[k];
-        let q = self.primes[k + n];
+        let p = *unsafe { self.primes.get_unchecked(k) };
+        let q = *unsafe { self.primes.get_unchecked(k + 1) };
         let segment = p * p..q * q;
-        let segment_min = p * p;
-        let segment_max = q * q;
-        let segment_len = segment_max - segment_min + 1;
 
-        let mut is_prime: Box<[bool]> = std::iter::repeat(true).take(segment_len).collect();
+        let mut is_prime = self.is_prime.clone();
+        is_prime.fill(true);
+        is_prime.resize(segment.len(), true);
+        let mut is_prime = Arc::new(Mutex::new(is_prime));
 
-        for pk in self.primes[..k + n].iter().copied() {
-            // Set all the multiples of pk to false (they aren't prime)
-            let start = segment_min.next_multiple_of(pk) - segment_min;
-            let stop = is_prime.len();
-            for x in (start..stop).step_by(pk) {
-                is_prime[x] = false;
-            }
-        }
-        self.primes.extend(
-            segment
-                .zip(is_prime.iter())
-                .filter_map(|(x, it_is_prime)| it_is_prime.then_some(x)),
-        );
+        // For the first k'th primes
+        let handles: Vec<JoinHandle<()>> = self.primes[..=k]
+            .iter()
+            .copied()
+            .map(|pk| {
+                let is_prime = Arc::clone(&is_prime);
+                let new_thread = thread::spawn(move || {
+                    // Mark all multiples of that prime as not prime.
+                    let start = segment.start.next_multiple_of(pk) - segment.start;
 
-        self.end_segment += n;
-    }
+                    // Gets exclusive access to read and write to is_prime until this thread is finished.
+                    let mut is_prime_inner = is_prime.lock().unwrap();
 
-    pub fn extend_at_most_n_segments_threaded(&mut self, n: usize) {
-        let k = self.end_segment;
-        let p = self.primes[k];
-        let q = self.primes[k + n];
-        let segment_min = p * p;
-        let segment_max = q * q - 1;
-        let segment = segment_min..segment_max;
-        let segment_len = segment_max - segment_min + 1;
-
-        // let mut is_prime: Box<[bool]> = std::iter::repeat(true).take(segment_len).collect();
-        let mut is_prime: Box<[AtomicBool]> = std::iter::repeat_with(|| AtomicBool::new(true))
-            .take(segment_len)
+                    for x in (start..is_prime_inner.len()).step_by(pk) {
+                        *unsafe { is_prime_inner.get_unchecked_mut(x) } = false;
+                    }
+                });
+                new_thread
+            })
             .collect();
 
-        for pk in &self.primes[..k + n] {
-            // Set all the multiples of pk to false (they aren't prime)
-            let start = segment_min.next_multiple_of(*pk) - segment_min;
-            let stop = is_prime.len();
-            (start..stop)
-                .step_by(*pk)
-                .par_bridge()
-                .into_par_iter()
-                .for_each(|x| {
-                    is_prime[x].store(false, Ordering::Relaxed);
-                });
+        for handle in handles {
+            handle.join().unwrap();
         }
+
+        let is_prime = is_prime.lock().unwrap().clone();
 
         self.primes.extend(
             segment
-                .zip(is_prime.iter())
-                .filter_map(|(x, it_is_prime)| it_is_prime.load(Ordering::Relaxed).then_some(x)),
+                .zip(&is_prime)
+                .filter_map(|(x, prime)| prime.then_some(x)),
         );
+        self.end_segment += 1;
 
-        self.end_segment += n;
+        self.is_prime = is_prime;
     }
 
-    /// Shorthand for `self.extend_at_most_n_segments(self.extend_at_most_n_segments_target);`
-    pub fn extend(&mut self) {
-        self.extend_at_most_n_segments(self.extend_at_most_n_segments_target);
+    /// Calculates some new primes, returning the new ones
+    pub fn extend_and_return(&mut self) -> &[usize] {
+        let current_num_primes = self.primes.len();
+        self.extend();
+        &self.primes[current_num_primes..]
     }
 
-    /// Returns the number of primes < `n`.
-    ///
-    /// # Safety
-    /// `self.primes` must be non-empty when this is called.
-    pub unsafe fn count_primes_less_or_equal_unchecked(&mut self, n: usize) -> usize {
-        while self.most_recent_prime_unchecked() < &n {
+    pub fn extend_while(&mut self, f: impl Fn(&Self) -> bool) {
+        while f(self) {
             self.extend();
         }
-        bisect_right(&self.primes, &n)
     }
 
-    /// Returns the number of primes < `n` if self.primes is non-empty, otherwise `None`.
-    pub fn count_primes_less_or_equal(&mut self, n: usize) -> Option<usize> {
-        self.primes
-            .is_empty()
-            .not()
-            .then_some(unsafe { self.count_primes_less_or_equal_unchecked(n) })
+    pub fn extend_while_last_prime_lt_n(&mut self, n: usize) {
+        self.extend_while(|s| s.last_prime() < n);
+    }
+
+    /// Returns the number of primes <= `n`.
+    pub fn count_primes_lt(&mut self, n: usize) -> usize {
+        self.extend_while_last_prime_lt_n(n);
+        bisect_right(&self.primes, &n)
     }
 
     /// A slice of the first n primes calculated via an instance.
     pub fn first_n_primes(&mut self, n: usize) -> &[usize] {
-        self.calculate_first_n_primes_exact(n)
-    }
-
-    /// Calculates primes without accidentally calculating more, returning a slice of them.
-    pub fn calculate_first_n_primes_exact(&mut self, n: usize) -> &[usize] {
-        while self.primes.len() < n {
-            self.extend();
-        }
+        self.extend_while(|s| s.primes.len() < n);
         &self.primes[..n]
     }
 
+    /// Returns the nth prime number generated by the sieve.
     pub fn nth_prime(&mut self, n: usize) -> usize {
+        self.extend_while(|s| s.primes.get(n).is_none());
+        unsafe { self.primes.get(n).copied().unwrap_unchecked() }
+    }
+
+    /// Returns whether `n` is prime.    
+    pub fn is_prime(&mut self, n: usize) -> bool {
         loop {
-            if let Some(x) = self.primes.get(n).copied() {
-                return x;
+            if self.contains_prime(n) {
+                return true;
+            }
+            if self.last_prime() > n {
+                return false;
             }
             self.extend();
         }
+    }
+
+    /// Returns the most recently calculated prime number,
+    /// which is the last element in `self.primes`
+    #[must_use]
+    pub fn last_prime(&self) -> usize {
+        *unsafe {
+            self.primes
+                .get_unchecked(self.primes.len().unchecked_sub(1))
+        }
+    }
+
+    /// Returns whether `n` is contained in `self.primes` using binary search.
+    fn contains_prime(&self, n: usize) -> bool {
+        self.primes.binary_search(&n).is_ok()
+    }
+
+    /// Returns a slice of the primes < `n`    
+    pub fn primes_lt(&mut self, n: usize) -> &[usize] {
+        let i = self.count_primes_lt(n);
+        &self.primes[..i]
+    }
+
+    /// Returns a slice of the primes >= `n`
+    pub fn primes_gte(&mut self, n: usize) -> &[usize] {
+        self.extend_while_last_prime_lt_n(n);
+
+        let i: usize = match self.primes.binary_search_by(|probe| probe.cmp(&n)) {
+            Ok(ok) => ok,
+            Err(err) => err,
+        };
+
+        &self.primes[i + 1..]
+    }
+
+    /// Whether `n` is a snowball prime.
+    /// For my purposes this is a prime number where removing the rightmost digit of the number does not make it composite.
+    pub fn is_snowball_prime(&mut self, n: usize) -> bool {
+        let mut m = n;
+        while m > 10 {
+            /// If at any stage the number isn't a prime, then return false
+            if !self.is_prime(m) {
+                return false;
+            }
+            m /= 10;
+        }
+        self.is_prime(m)
+    }
+
+    // pub fn snowball_primes_lt(&mut self, n: usize) -> impl Iterator<Item = &usize> {
+    //     let mut clone = self.clone();
+    //     self.primes_lt(n)
+    //         .iter()
+    //         .filter(move |m| clone.is_snowball_prime(**m))
+    // }
+
+    pub fn first_int_with_n_prime_factors(&mut self, n: usize) -> usize {
+        if let Some(x) = self
+            .primes
+            .clone()
+            .into_iter()
+            .find(|m| self.prime_factors_of(*m).count() == n)
+        {
+            return x;
+        }
+
+        loop {
+            let new_primes: Box<[usize]> = self.extend_and_return().iter().copied().collect();
+
+            if let Some(x) = new_primes
+                .iter()
+                .find(|m| self.prime_factors_of(**m).count() == n)
+            {
+                return *x;
+            }
+        }
+    }
+
+    pub fn ints_with_ascending_numbers_of_prime_factors_lt_n(
+        &mut self,
+        n: usize,
+    ) -> impl Iterator<Item = usize> + '_ {
+        (0..n).map(|m| self.first_int_with_n_prime_factors(m))
+    }
+
+    pub fn is_mersenne_prime(&mut self, n: usize) -> bool {
+        self.is_prime(n) && (n - 1).is_power_of_two()
+    }
+
+    pub fn mersenne_primes(&mut self) -> impl Iterator<Item = usize> + '_ {
+        let powers_of_two = (1..).map(|n| 2usize.pow(n));
+        powers_of_two.map(|n| n - 1).filter(|n| self.is_prime(*n))
     }
 }
