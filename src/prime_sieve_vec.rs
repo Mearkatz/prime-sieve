@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, Mutex},
-    thread::{self, JoinHandle},
-};
+
 
 use bisection::bisect_right;
 
@@ -75,73 +72,27 @@ impl PrimeSieveVec {
     #[inline]
     #[allow(clippy::many_single_char_names)]
     pub fn extend(&mut self) {
-        // let k = self.end_segment;
-        // let p = *unsafe { self.primes.get_unchecked(k) };
-        // let q = *unsafe { self.primes.get_unchecked(k + 1) };
-        // let segment = p * p..q * q;
-
-        // self.is_prime.fill(true);
-        // self.is_prime.resize(segment.len(), true);
-
-        // for pk in self.primes[..=k].iter().copied() {
-        //     let start = segment.start.next_multiple_of(pk) - segment.start;
-        //     for x in (start..self.is_prime.len()).step_by(pk) {
-        //         *unsafe { self.is_prime.get_unchecked_mut(x) } = false;
-        //     }
-        // }
-
-        // self.primes.extend(
-        //     segment
-        //         .zip(&self.is_prime)
-        //         .filter_map(|(x, prime)| prime.then_some(x)),
-        // );
-        // self.end_segment += 1;
-
         let k = self.end_segment;
         let p = *unsafe { self.primes.get_unchecked(k) };
         let q = *unsafe { self.primes.get_unchecked(k + 1) };
         let segment = p * p..q * q;
 
-        let mut is_prime = self.is_prime.clone();
-        is_prime.fill(true);
-        is_prime.resize(segment.len(), true);
-        let mut is_prime = Arc::new(Mutex::new(is_prime));
+        self.is_prime.fill(true);
+        self.is_prime.resize(segment.len(), true);
 
-        // For the first k'th primes
-        let handles: Vec<JoinHandle<()>> = self.primes[..=k]
-            .iter()
-            .copied()
-            .map(|pk| {
-                let is_prime = Arc::clone(&is_prime);
-                let new_thread = thread::spawn(move || {
-                    // Mark all multiples of that prime as not prime.
-                    let start = segment.start.next_multiple_of(pk) - segment.start;
-
-                    // Gets exclusive access to read and write to is_prime until this thread is finished.
-                    let mut is_prime_inner = is_prime.lock().unwrap();
-
-                    for x in (start..is_prime_inner.len()).step_by(pk) {
-                        *unsafe { is_prime_inner.get_unchecked_mut(x) } = false;
-                    }
-                });
-                new_thread
-            })
-            .collect();
-
-        for handle in handles {
-            handle.join().unwrap();
+        for pk in self.primes[..=k].iter().copied() {
+            let start = segment.start.next_multiple_of(pk) - segment.start;
+            for x in (start..self.is_prime.len()).step_by(pk) {
+                *unsafe { self.is_prime.get_unchecked_mut(x) } = false;
+            }
         }
-
-        let is_prime = is_prime.lock().unwrap().clone();
 
         self.primes.extend(
             segment
-                .zip(&is_prime)
+                .zip(&self.is_prime)
                 .filter_map(|(x, prime)| prime.then_some(x)),
         );
         self.end_segment += 1;
-
-        self.is_prime = is_prime;
     }
 
     /// Calculates some new primes, returning the new ones
