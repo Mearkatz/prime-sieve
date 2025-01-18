@@ -4,7 +4,10 @@ fn main() {
     const UPPERBOUND: usize = 1_000_000_000;
     let timer = std::time::Instant::now();
     let mut sieve = PrimeSieveVec::new();
-    sieve.reserve_in_advance(approx_primes_lt(UPPERBOUND) * 10 / 9);
+
+    let approx = approx_primes_lt(UPPERBOUND);
+    println!("Reserving {approx} elements in sieve");
+    sieve.reserve_in_advance(approx);
     println!(
         "Primes < {UPPERBOUND} = {}",
         sieve.count_primes_lt(UPPERBOUND)

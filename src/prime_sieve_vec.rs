@@ -1,5 +1,3 @@
-
-
 use bisection::bisect_right;
 
 /// An approximation for the number of primes < n
@@ -11,7 +9,7 @@ use bisection::bisect_right;
 #[must_use]
 pub fn approx_primes_lt(n: usize) -> usize {
     let m = n as f64;
-    (m / m.ln()) as usize
+    (m / m.ln()) as usize * 2
 }
 
 #[derive(Debug)]
@@ -24,7 +22,7 @@ pub struct PrimeSieveVec {
 impl Default for PrimeSieveVec {
     fn default() -> Self {
         Self {
-            primes: Self::STARTING_PRIMES.to_vec(),
+            primes: vec![2, 3, 5, 7],
             is_prime: vec![],
             end_segment: 1,
         }
@@ -33,8 +31,6 @@ impl Default for PrimeSieveVec {
 
 #[allow(unused)]
 impl PrimeSieveVec {
-    pub const STARTING_PRIMES: [usize; 4] = [2, 3, 5, 7];
-
     /// Creates a new `PrimeSieveVec`
     #[must_use]
     pub fn new() -> Self {
@@ -81,8 +77,8 @@ impl PrimeSieveVec {
         self.is_prime.resize(segment.len(), true);
 
         for pk in self.primes[..=k].iter().copied() {
-            let start = segment.start.next_multiple_of(pk) - segment.start;
-            for x in (start..self.is_prime.len()).step_by(pk) {
+            let start = segment.start.next_multiple_of(pk);
+            for x in (start - segment.start..self.is_prime.len()).step_by(pk) {
                 *unsafe { self.is_prime.get_unchecked_mut(x) } = false;
             }
         }
@@ -93,6 +89,12 @@ impl PrimeSieveVec {
                 .filter_map(|(x, prime)| prime.then_some(x)),
         );
         self.end_segment += 1;
+    }
+
+    /// Returns a slice of the primes < `n`    
+    pub fn primes_lt(&mut self, n: usize) -> &[usize] {
+        let i = self.count_primes_lt(n);
+        &self.primes[..i]
     }
 
     /// Calculates some new primes, returning the new ones
@@ -108,13 +110,13 @@ impl PrimeSieveVec {
         }
     }
 
-    pub fn extend_while_last_prime_lt_n(&mut self, n: usize) {
+    pub fn extend_while_last_prime_lt(&mut self, n: usize) {
         self.extend_while(|s| s.last_prime() < n);
     }
 
     /// Returns the number of primes <= `n`.
     pub fn count_primes_lt(&mut self, n: usize) -> usize {
-        self.extend_while_last_prime_lt_n(n);
+        self.extend_while_last_prime_lt(n);
         bisect_right(&self.primes, &n)
     }
 
@@ -158,15 +160,9 @@ impl PrimeSieveVec {
         self.primes.binary_search(&n).is_ok()
     }
 
-    /// Returns a slice of the primes < `n`    
-    pub fn primes_lt(&mut self, n: usize) -> &[usize] {
-        let i = self.count_primes_lt(n);
-        &self.primes[..i]
-    }
-
     /// Returns a slice of the primes >= `n`
     pub fn primes_gte(&mut self, n: usize) -> &[usize] {
-        self.extend_while_last_prime_lt_n(n);
+        self.extend_while_last_prime_lt(n);
 
         let i: usize = match self.primes.binary_search_by(|probe| probe.cmp(&n)) {
             Ok(ok) => ok,

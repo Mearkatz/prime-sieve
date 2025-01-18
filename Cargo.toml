@@ -11,11 +11,11 @@ nursery = { level = "deny", priority = -3 }
 expect_used = { level = "deny", priority = -5 }
 
 [profile.release]
-# debug = true
-# codegen-units = 1
-# lto = "fat"
-# panic = "abort"
-# strip = "symbols"
+debug = false
+codegen-units = 1
+lto = "fat"
+panic = "abort"
+strip = "symbols"
 
 [dependencies]
 bisection = "0.1.0"
